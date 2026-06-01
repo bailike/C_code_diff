@@ -1,0 +1,2345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Code Diff Tool</title>
+<style>
+/* ========== Reset & Base ========== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 14px;
+  background: #ffffff;
+  color: #1a1a1a;
+  height: 100vh;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+
+/* ========== Toolbar ========== */
+#toolbar {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+  background: #f0f0f0; border-bottom: 1px solid #d0d0d0;
+  flex-shrink: 0; flex-wrap: wrap; min-height: 36px;
+}
+#toolbar button {
+  padding: 4px 10px; border: 1px solid #bbb; border-radius: 3px;
+  background: #fff; color: #333; cursor: pointer; font-size: 12px;
+  white-space: nowrap;
+}
+#toolbar button:hover { background: #e8e8e8; }
+#toolbar button.active { background: #0066cc; border-color: #0066cc; color: #fff; }
+#toolbar button:disabled { opacity: 0.4; cursor: default; }
+#toolbar .sep { width: 1px; height: 20px; background: #d0d0d0; margin: 0 4px; flex-shrink: 0; }
+#toolbar label { font-size: 12px; color: #555; display: flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
+#toolbar input[type="checkbox"] { cursor: pointer; }
+#diffCount { font-size: 12px; color: #666; min-width: 80px; text-align: center; font-weight: bold; }
+
+/* ========== Search Bars ========== */
+#searchRow {
+  display: flex; gap: 0; flex-shrink: 0; background: #f5f5f5;
+  border-bottom: 1px solid #d0d0d0;
+}
+.searchBar {
+  flex: 1; display: flex; align-items: center; gap: 4px;
+  padding: 4px 8px; font-size: 12px;
+}
+.searchBar:first-child { border-right: 1px solid #d0d0d0; }
+.searchBar input[type="text"] {
+  flex: 1; min-width: 80px; padding: 3px 6px; border: 1px solid #ccc;
+  border-radius: 3px; background: #fff; color: #1a1a1a; font-family: inherit;
+  font-size: 12px;
+}
+.searchBar input[type="text"]:focus { outline: none; border-color: #0066cc; }
+.searchBar button {
+  padding: 2px 6px; border: 1px solid #bbb; border-radius: 3px;
+  background: #fff; color: #333; cursor: pointer; font-size: 11px;
+}
+.searchBar button:hover { background: #e8e8e8; }
+.searchBar button.active { background: #0066cc; color: #fff; }
+.searchBar label { display: flex; align-items: center; gap: 2px; font-size: 11px; color: #888; white-space: nowrap; }
+.searchBar .count { font-size: 11px; color: #888; min-width: 60px; text-align: right; }
+.searchBar .count.hasResults { color: #0066cc; }
+
+/* ========== Main Panels ========== */
+#panelsContainer {
+  flex: 1; display: flex; overflow: hidden; position: relative;
+  background: #fff;
+}
+.panelWrapper {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  position: relative;
+}
+.panelWrapper:first-child { border-right: 2px solid #d0d0d0; }
+.panelHeader {
+  padding: 3px 10px; background: #f5f5f5; font-size: 11px; color: #666;
+  border-bottom: 1px solid #d0d0d0; flex-shrink: 0;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.panelContent {
+  flex: 1; overflow: auto; position: relative;
+  font-family: 'Consolas', 'Courier New', monospace; font-size: 14px;
+  line-height: 20px; background: #fff;
+}
+.panelContent::-webkit-scrollbar { width: 10px; height: 10px; }
+.panelContent::-webkit-scrollbar-track { background: #f0f0f0; }
+.panelContent::-webkit-scrollbar-thumb { background: #c0c0c0; border-radius: 5px; }
+.panelContent::-webkit-scrollbar-thumb:hover { background: #a0a0a0; }
+.panelContent::-webkit-scrollbar-corner { background: #f0f0f0; }
+
+/* ========== Code Table ========== */
+.codeTable { border-collapse: collapse; table-layout: fixed; width: 100%; }
+.codeTable col.lineNum { width: 55px; }
+.codeTable td {
+  padding: 0 4px; white-space: pre; line-height: 20px;
+  height: 20px; vertical-align: top;
+}
+.codeTable .ln {
+  text-align: right; color: #999; padding-right: 10px;
+  cursor: pointer; user-select: none; border-right: 1px solid #e0e0e0;
+  min-width: 55px; background: #fafafa;
+}
+.codeTable .ln:hover { color: #333; background: #e8e8e8; }
+.codeTable .code {
+  color: #1a1a1a; overflow: hidden; text-overflow: clip; padding-left: 8px;
+  user-select: text; cursor: text;
+}
+.codeTable .spacer { height: 20px; }
+
+/* ========== Diff Highlighting ========== */
+tr.diffSame { }
+tr.diffAdded .code { background: #e6ffe6; }
+tr.diffRemoved .code { background: #ffe6e6; }
+tr.diffModified .code { background: #ffffd0; }
+tr.diffCurrent { outline: 2px solid #0066cc; outline-offset: -2px; }
+tr.diffAdded .ln { background: #d4f0d4; }
+tr.diffRemoved .ln { background: #f0d4d4; }
+tr.diffModified .ln { background: #f0f0c0; }
+
+/* Character-level diff */
+.charAdded { background: #90ee90; border-radius: 2px; }
+.charRemoved { background: #ffb0b0; border-radius: 2px; text-decoration: line-through; }
+.charModified { background: #f0f0a0; border-radius: 2px; }
+
+/* ========== Selection ========== */
+tr.rowSelected td.code { background: #cce0ff !important; }
+tr.rowSelected td.ln { background: #b0d0f0 !important; color: #0066cc; font-weight: bold; }
+
+/* ========== Search Highlighting ========== */
+mark.searchMatch { background: #ffa500; color: #000; border-radius: 2px; padding: 0 1px; }
+mark.searchCurrent { background: #ff8800; color: #000; border-radius: 2px; padding: 0 1px; outline: 2px solid #cc4400; }
+
+/* ========== Fold Lines ========== */
+tr.foldRowSame { cursor: pointer; }
+tr.foldRowSame td {
+  color: #888; text-align: center; padding: 5px 0;
+  background: #f8f8f8; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc;
+  font-size: 12px;
+}
+tr.foldRowSame:hover td { color: #333; background: #eee; }
+tr.foldRowSame .foldText { font-style: italic; }
+
+tr.foldRowDiff { cursor: pointer; }
+tr.foldRowDiff td {
+  color: #996600; text-align: center; padding: 5px 0;
+  background: #fffde6; border-top: 1px solid #e0c000; border-bottom: 1px solid #e0c000;
+  font-size: 12px;
+}
+tr.foldRowDiff:hover td { color: #664400; background: #fff9cc; }
+tr.foldRowDiff .foldText { font-style: italic; }
+
+/* ========== Region Diff Panel ========== */
+#regionPanel {
+  display: none; flex-direction: column; border-top: 3px solid #0066cc;
+  height: 200px; min-height: 80px; flex-shrink: 0; background: #fff;
+  position: relative;
+}
+#regionPanel.visible { display: flex; }
+#regionPanel .panelContent { flex: 1; overflow: auto; }
+#regionResizer {
+  position: absolute; top: -6px; left: 0; right: 0; height: 10px;
+  cursor: row-resize; z-index: 20;
+}
+#regionResizer:hover { background: rgba(0,102,204,0.2); }
+
+/* ========== Status Bar ========== */
+#statusBar {
+  display: flex; gap: 16px; padding: 3px 10px; background: #0066cc;
+  color: #fff; font-size: 11px; flex-shrink: 0; align-items: center;
+}
+#statusBar span { white-space: nowrap; }
+
+/* ========== Dialogs ========== */
+.dialogOverlay {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.4); z-index: 1000; justify-content: center;
+  align-items: center;
+}
+.dialogOverlay.visible { display: flex; }
+.dialogBox {
+  background: #fff; border: 1px solid #ccc; border-radius: 6px;
+  padding: 20px; min-width: 300px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+.dialogBox h3 { margin-bottom: 12px; color: #333; font-size: 14px; }
+.dialogBox input[type="text"], .dialogBox input[type="number"], .dialogBox select {
+  width: 100%; padding: 6px 10px; margin-bottom: 10px; border: 1px solid #ccc;
+  border-radius: 3px; background: #fff; color: #1a1a1a; font-family: inherit;
+  font-size: 13px;
+}
+.dialogBox input:focus, .dialogBox select:focus { outline: none; border-color: #0066cc; }
+.dialogBtns { display: flex; gap: 8px; justify-content: flex-end; }
+.dialogBtns button {
+  padding: 6px 16px; border: 1px solid #bbb; border-radius: 3px;
+  background: #fff; color: #333; cursor: pointer; font-size: 12px;
+}
+.dialogBtns button.primary { background: #0066cc; border-color: #0066cc; color: #fff; }
+.dialogBtns button:hover { background: #e8e8e8; }
+.dialogBtns button.primary:hover { background: #0052a3; }
+
+/* ========== Unified View ========== */
+#unifiedPanel {
+  display: none; flex: 1; overflow: auto; font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 14px; line-height: 20px; background: #fff; user-select: text;
+}
+#unifiedPanel.visible { display: block; }
+.unifiedRow { padding: 0 8px; white-space: pre; line-height: 20px; height: 20px; display: flex; }
+.unifiedPrefix { width: 20px; text-align: center; flex-shrink: 0; font-weight: bold; }
+.unifiedRemoved { background: #ffe6e6; }
+.unifiedRemoved .unifiedPrefix { color: #cc0000; }
+.unifiedAdded { background: #e6ffe6; }
+.unifiedAdded .unifiedPrefix { color: #009900; }
+.unifiedSame { }
+
+/* ========== Empty state ========== */
+.emptyMsg {
+  display: flex; align-items: center; justify-content: center; height: 100%;
+  color: #999; font-size: 14px;
+}
+
+/* Drop zone highlight */
+.dropZone { border: 2px dashed #0066cc !important; background: #e6f0ff !important; }
+
+/* Resizer */
+#resizer {
+  width: 6px; cursor: col-resize; background: transparent; flex-shrink: 0;
+  position: relative; z-index: 10;
+}
+#resizer:hover, #resizer.active { background: #0066cc; }
+</style>
+</head>
+<body>
+
+<!-- Toolbar -->
+<div id="toolbar">
+  <button id="btnImportA" title="导入左侧文件">导入左文件</button>
+  <button id="btnImportB" title="导入右侧文件">导入右文件</button>
+  <span class="sep"></span>
+  <button id="btnSwap" title="交换左右文件" disabled>交换</button>
+  <button id="btnReset" title="重置所有状态到初始" disabled>重置</button>
+  <span class="sep"></span>
+  <button id="btnFullDiff" title="整体对比两个文件" disabled>整体对比</button>
+  <button id="btnSelectRegion" title="进入区域选择模式">选择区域</button>
+  <button id="btnExecRegion" title="执行选中区域对比" disabled>执行对比</button>
+  <span class="sep"></span>
+  <button id="btnPrevDiff" title="上一个差异 (Shift+F7)" disabled>上一差异</button>
+  <button id="btnNextDiff" title="下一个差异 (F7)" disabled>下一差异</button>
+  <span id="diffCount">未对比</span>
+  <span class="sep"></span>
+  <label title="左右面板同步滚动"><input type="checkbox" id="chkSyncScroll">同步滚动</label>
+  <label title="忽略空行和注释"><input type="checkbox" id="chkIgnoreComments">忽略空行/注释</label>
+  <label title="忽略空白字符差异"><input type="checkbox" id="chkIgnoreWhitespace" checked>忽略空白</label>
+  <label title="忽略大小写"><input type="checkbox" id="chkIgnoreCase" checked>忽略大小写</label>
+  <label title="折叠连续相同行（≥10行）"><input type="checkbox" id="chkFoldSame">折叠相同</label>
+  <label title="折叠连续不同行（≥10行）"><input type="checkbox" id="chkFoldDiff">折叠不同</label>
+  <span class="sep"></span>
+  <button id="btnGotoA" title="跳转到行 (Ctrl+G)">跳转A</button>
+  <button id="btnGotoB" title="跳转到行 (Ctrl+G)">跳转B</button>
+  <button id="btnUnifiedView" title="切换统一视图" style="margin-left:auto;">统一视图</button>
+</div>
+
+<!-- Search Bars -->
+<div id="searchRow">
+  <div class="searchBar" id="searchBarA">
+    <input type="text" id="searchInputA" placeholder="搜索文件A... (Ctrl+F)">
+    <label><input type="checkbox" id="chkCaseA">大小写</label>
+    <button id="btnSearchPrevA">↑</button>
+    <button id="btnSearchNextA">↓</button>
+    <span class="count" id="searchCountA"></span>
+  </div>
+  <div class="searchBar" id="searchBarB">
+    <input type="text" id="searchInputB" placeholder="搜索文件B... (Ctrl+F)">
+    <label><input type="checkbox" id="chkCaseB">大小写</label>
+    <button id="btnSearchPrevB">↑</button>
+    <button id="btnSearchNextB">↓</button>
+    <span class="count" id="searchCountB"></span>
+  </div>
+</div>
+
+<!-- Main Panel: Side-by-side -->
+<div id="panelsContainer">
+  <div class="panelWrapper" id="panelA">
+    <div class="panelHeader"><span id="fileNameA">文件A (未导入)</span><span id="lineInfoA"></span></div>
+    <div class="panelContent" id="contentA"><div class="emptyMsg">点击"导入左文件"选择.cpp文件，或拖拽文件到此处</div></div>
+  </div>
+  <div id="resizer"></div>
+  <div class="panelWrapper" id="panelB">
+    <div class="panelHeader"><span id="fileNameB">文件B (未导入)</span><span id="lineInfoB"></span></div>
+    <div class="panelContent" id="contentB"><div class="emptyMsg">点击"导入右文件"选择.cpp文件，或拖拽文件到此处</div></div>
+  </div>
+</div>
+
+<!-- Unified View (hidden by default) -->
+<div id="unifiedPanel"><div class="emptyMsg">请先执行对比</div></div>
+
+<!-- Region Diff Panel -->
+<div id="regionPanel">
+  <div id="regionResizer"></div>
+  <div class="panelHeader">
+    <span>🔍 区域对比结果</span>
+    <button id="btnCloseRegion" style="background:#3c3c3c;border:1px solid #555;color:#ccc;cursor:pointer;padding:2px 8px;border-radius:3px;font-size:11px;">关闭</button>
+  </div>
+  <div class="panelContent" id="regionContent"></div>
+</div>
+
+<!-- Status Bar -->
+<div id="statusBar">
+  <span id="statusFileInfo">就绪</span>
+  <span id="statusSelection"></span>
+  <span id="statusEncoding">编码: UTF-8</span>
+</div>
+
+<!-- Goto Line Dialog -->
+<div class="dialogOverlay" id="gotoDialog">
+  <div class="dialogBox">
+    <h3 id="gotoTitle">跳转到行</h3>
+    <input type="number" id="gotoInput" min="1" placeholder="输入行号...">
+    <div class="dialogBtns">
+      <button id="gotoCancel">取消</button>
+      <button id="gotoConfirm" class="primary">跳转</button>
+    </div>
+  </div>
+</div>
+
+<!-- Encoding Dialog -->
+<div class="dialogOverlay" id="encodingDialog">
+  <div class="dialogBox">
+    <h3>选择文件编码</h3>
+    <p style="font-size:12px;color:#aaa;margin-bottom:10px;">文件可能不是UTF-8编码，请选择正确编码：</p>
+    <select id="encodingSelect">
+      <option value="UTF-8">UTF-8</option>
+      <option value="GBK">GBK / GB2312</option>
+      <option value="windows-1252">Latin-1 (Windows-1252)</option>
+      <option value="Shift_JIS">Shift_JIS</option>
+    </select>
+    <div class="dialogBtns">
+      <button id="encodingCancel">取消</button>
+      <button id="encodingConfirm" class="primary">重新读取</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hidden file inputs -->
+<input type="file" id="fileInputA" accept=".cpp,.h,.c,.hpp,.cxx,.cc,.txt,.cs,.java,.py,.js,.ts" style="display:none">
+<input type="file" id="fileInputB" accept=".cpp,.h,.c,.hpp,.cxx,.cc,.txt,.cs,.java,.py,.js,.ts" style="display:none">
+
+<script>
+// ============================================================
+// Code Diff Tool - Complete Implementation
+// ============================================================
+
+const LINE_HEIGHT = 20;
+const SCROLL_BUFFER = 150; // extra lines to render above/below viewport
+
+// ========== Application State ==========
+const state = {
+  fileA: null, fileB: null,  // { name, lines[], rawBytes (ArrayBuffer) }
+  filteredA: null, filteredB: null, // { lines[], origIndex[] } after comment/blank removal
+  diffItems: [],        // diff result items
+  displayList: [],      // items with fold markers inserted
+  currentDiff: -1,      // index into diffDiffIndices (in displayList space)
+  diffDiffIndices: [],  // indices of displayList that are not "same"
+  viewMode: 'side',     // 'side' | 'unified'
+  collapsedFolds: new Set(), // set of fold start indices that are currently collapsed
+  searchA: { query:'', caseSensitive:false, results:[], current:-1, dataIdx:[] },
+  searchB: { query:'', caseSensitive:false, results:[], current:-1, dataIdx:[] },
+  selectionA: null, selectionB: null, // {start, end} in original line numbers
+  regionSelectMode: false, // true when "选择区域" is active
+  gotoPanel: null,      // 'A' or 'B' for goto dialog
+  encoding: 'UTF-8',
+};
+
+// ========== DOM References ==========
+const $ = id => document.getElementById(id);
+const dom = {
+  toolbar: $('toolbar'),
+  contentA: $('contentA'), contentB: $('contentB'),
+  unifiedPanel: $('unifiedPanel'),
+  regionPanel: $('regionPanel'), regionContent: $('regionContent'),
+  fileNameA: $('fileNameA'), fileNameB: $('fileNameB'),
+  lineInfoA: $('lineInfoA'), lineInfoB: $('lineInfoB'),
+  diffCount: $('diffCount'),
+  statusFileInfo: $('statusFileInfo'), statusSelection: $('statusSelection'),
+  statusEncoding: $('statusEncoding'),
+  searchInputA: $('searchInputA'), searchInputB: $('searchInputB'),
+  searchCountA: $('searchCountA'), searchCountB: $('searchCountB'),
+  chkCaseA: $('chkCaseA'), chkCaseB: $('chkCaseB'),
+  chkIgnoreComments: $('chkIgnoreComments'),
+  chkIgnoreWhitespace: $('chkIgnoreWhitespace'),
+  chkIgnoreCase: $('chkIgnoreCase'),
+  chkSyncScroll: $('chkSyncScroll'),
+  chkFoldSame: $('chkFoldSame'),
+  chkFoldDiff: $('chkFoldDiff'),
+  btnImportA: $('btnImportA'), btnImportB: $('btnImportB'),
+  btnSwap: $('btnSwap'), btnReset: $('btnReset'),
+  btnFullDiff: $('btnFullDiff'), btnSelectRegion: $('btnSelectRegion'),
+  btnExecRegion: $('btnExecRegion'),
+  btnUnifiedView: $('btnUnifiedView'),
+  btnPrevDiff: $('btnPrevDiff'), btnNextDiff: $('btnNextDiff'),
+  btnGotoA: $('btnGotoA'), btnGotoB: $('btnGotoB'),
+  resizer: $('resizer'),
+  gotoDialog: $('gotoDialog'), gotoTitle: $('gotoTitle'),
+  gotoInput: $('gotoInput'),
+  encodingDialog: $('encodingDialog'),
+  searchBarA: $('searchBarA'), searchBarB: $('searchBarB'),
+};
+
+// ========== Utility Functions ==========
+function escapeHTML(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function simpleHash(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  return h;
+}
+
+// ========== Encoding Detection ==========
+function detectEncoding(buffer) {
+  const arr = new Uint8Array(buffer);
+  // Check BOM
+  if (arr.length >= 3 && arr[0] === 0xEF && arr[1] === 0xBB && arr[2] === 0xBF) {
+    return 'UTF-8-BOM';
+  }
+  // Check if valid UTF-8
+  let i = 0;
+  while (i < arr.length) {
+    const b = arr[i];
+    if (b < 0x80) { i++; }
+    else if ((b & 0xE0) === 0xC0) {
+      if (i + 1 >= arr.length || (arr[i+1] & 0xC0) !== 0x80) return 'NOT-UTF8';
+      i += 2;
+    } else if ((b & 0xF0) === 0xE0) {
+      if (i + 2 >= arr.length || (arr[i+1] & 0xC0) !== 0x80 || (arr[i+2] & 0xC0) !== 0x80) return 'NOT-UTF8';
+      i += 3;
+    } else if ((b & 0xF8) === 0xF0) {
+      if (i + 3 >= arr.length || (arr[i+1] & 0xC0) !== 0x80 || (arr[i+2] & 0xC0) !== 0x80 || (arr[i+3] & 0xC0) !== 0x80) return 'NOT-UTF8';
+      i += 4;
+    } else {
+      return 'NOT-UTF8';
+    }
+  }
+  return 'UTF-8';
+}
+
+function decodeBuffer(buffer, encoding) {
+  try {
+    const decoder = new TextDecoder(encoding);
+    return decoder.decode(buffer);
+  } catch(e) {
+    const decoder = new TextDecoder('UTF-8');
+    return decoder.decode(buffer);
+  }
+}
+
+function probeGBK(buffer) {
+  // Quick heuristic: check for common GBK byte patterns
+  const arr = new Uint8Array(buffer);
+  let gbkScore = 0;
+  for (let i = 0; i < Math.min(arr.length, 2000); i++) {
+    if (arr[i] >= 0x81 && arr[i] <= 0xFE) {
+      if (i + 1 < arr.length && arr[i+1] >= 0x40 && arr[i+1] <= 0xFE) {
+        gbkScore++;
+        i++;
+      }
+    }
+  }
+  return gbkScore > 5;
+}
+
+// ========== File Import ==========
+function triggerFileImport(side) {
+  const inputId = side === 'A' ? 'fileInputA' : 'fileInputB';
+  const input = document.getElementById(inputId);
+  if (input) {
+    input.value = ''; // Reset so same file can be re-selected
+    input.click();
+  }
+}
+
+function setupFileInputs() {
+  const inputA = document.getElementById('fileInputA');
+  const inputB = document.getElementById('fileInputB');
+
+  if (inputA) {
+    inputA.addEventListener('change', function(e) {
+      if (this.files.length > 0) handleFile(this.files[0], 'A');
+    });
+  }
+  if (inputB) {
+    inputB.addEventListener('change', function(e) {
+      if (this.files.length > 0) handleFile(this.files[0], 'B');
+    });
+  }
+}
+
+async function handleFile(file, side) {
+  const buffer = await file.arrayBuffer();
+  const encResult = detectEncoding(buffer);
+  let encoding = 'UTF-8';
+
+  if (encResult === 'NOT-UTF8') {
+    if (probeGBK(buffer)) {
+      encoding = 'GBK';
+    }
+    // Show encoding dialog for non-UTF-8 files
+    showEncodingDialog(file, buffer, side, encoding);
+    return;
+  }
+
+  const text = decodeBuffer(buffer, encoding);
+  loadFileData(file.name, text, buffer, side, encoding);
+}
+
+function loadFileData(name, text, buffer, side, encoding) {
+  const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+
+  if (side === 'A') {
+    state.fileA = { name, lines, rawBuffer: buffer };
+    dom.fileNameA.textContent = `文件A: ${name}`;
+    dom.lineInfoA.textContent = `${lines.length} 行`;
+    renderPanel('A');
+  } else {
+    state.fileB = { name, lines, rawBuffer: buffer };
+    dom.fileNameB.textContent = `文件B: ${name}`;
+    dom.lineInfoB.textContent = `${lines.length} 行`;
+    renderPanel('B');
+  }
+
+  state.encoding = encoding;
+  dom.statusEncoding.textContent = `编码: ${encoding}`;
+  updateStatus();
+  updateButtons();
+  clearDiff();
+  clearSearch('A');
+  clearSearch('B');
+}
+
+function reLoadFile(side) {
+  const file = side === 'A' ? state.fileA : state.fileB;
+  if (!file || !file.rawBuffer) {
+    // Try to re-read from file input
+    createFileInput(side);
+    return;
+  }
+  const text = decodeBuffer(file.rawBuffer, state.encoding);
+  loadFileData(file.name, text, file.rawBuffer, side, state.encoding);
+}
+
+function showEncodingDialog(file, buffer, side, suggestedEncoding) {
+  const dialog = dom.encodingDialog;
+  const select = $('encodingSelect');
+  const confirmBtn = $('encodingConfirm');
+  const cancelBtn = $('encodingCancel');
+
+  select.value = suggestedEncoding || 'UTF-8';
+  dialog.classList.add('visible');
+
+  const onConfirm = () => {
+    const enc = select.value;
+    const text = decodeBuffer(buffer, enc);
+    loadFileData(file.name, text, buffer, side, enc);
+    dialog.classList.remove('visible');
+    cleanup();
+  };
+
+  const onCancel = () => {
+    // Default to UTF-8
+    const text = decodeBuffer(buffer, 'UTF-8');
+    loadFileData(file.name, text, buffer, side, 'UTF-8');
+    dialog.classList.remove('visible');
+    cleanup();
+  };
+
+  const cleanup = () => {
+    confirmBtn.removeEventListener('click', onConfirm);
+    cancelBtn.removeEventListener('click', onCancel);
+  };
+
+  confirmBtn.addEventListener('click', onConfirm);
+  cancelBtn.addEventListener('click', onCancel);
+}
+
+// ========== Comment & Blank Line Filtering ==========
+function isLineComment(line) {
+  const trimmed = line.trim();
+  return trimmed.startsWith('//');
+}
+
+function findBlockCommentRange(lines) {
+  const ranges = [];
+  let inBlock = false;
+  let blockStart = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!inBlock) {
+      const start = line.indexOf('/*');
+      if (start !== -1) {
+        // Check if this line has both /* and */
+        const afterStart = line.indexOf('*/', start + 2);
+        if (afterStart !== -1) {
+          // Single-line block comment
+          const before = line.substring(0, start).trim();
+          const after = line.substring(afterStart + 2).trim();
+          if (before === '' && after === '') {
+            ranges.push({ start: i, end: i });
+          }
+        } else {
+          inBlock = true;
+          blockStart = i;
+          // Check if anything before /* is non-comment
+          if (line.substring(0, start).trim() === '') {
+            // Whole line is effectively comment start
+          }
+        }
+      }
+    } else {
+      const end = line.indexOf('*/');
+      if (end !== -1) {
+        inBlock = false;
+        const after = line.substring(end + 2).trim();
+        if (after === '') {
+          ranges.push({ start: blockStart, end: i });
+        } else {
+          // There's code after */, only mark lines before this one
+          if (i > blockStart) {
+            ranges.push({ start: blockStart, end: i - 1 });
+          }
+        }
+      }
+    }
+  }
+  // Unclosed block comment
+  if (inBlock) {
+    ranges.push({ start: blockStart, end: lines.length - 1 });
+  }
+  return ranges;
+}
+
+function filterLines(lines, options = {}) {
+  const { ignoreComments = true, ignoreWhitespace = false, ignoreCase = false } = options;
+  const filteredLines = [];
+  const origIndex = [];
+
+  // Find block comment ranges
+  const blockRanges = ignoreComments ? findBlockCommentRange(lines) : [];
+  const blockSet = new Set();
+  if (ignoreComments) {
+    for (const r of blockRanges) {
+      for (let i = r.start; i <= r.end; i++) blockSet.add(i);
+    }
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    if (blockSet.has(i)) continue; // Skip block comment lines
+
+    let line = lines[i];
+
+    // Remove trailing line comment
+    if (ignoreComments) {
+      // Remove // but only outside strings (simplified: just find //)
+      const commentIdx = line.indexOf('//');
+      if (commentIdx !== -1) {
+        line = line.substring(0, commentIdx);
+      }
+    }
+
+    // Skip empty/blank lines
+    if (line.trim() === '') continue;
+
+    if (ignoreWhitespace) {
+      line = line.trim().replace(/\s+/g, ' ');
+    }
+
+    if (ignoreCase) {
+      line = line.toLowerCase();
+    }
+
+    filteredLines.push(line);
+    origIndex.push(i);
+  }
+
+  return { lines: filteredLines, origIndex };
+}
+
+// Rebuild filter keeping original line references
+function filterLinesForDiff(lines, options = {}) {
+  const result = filterLines(lines, options);
+  return result;
+}
+
+// ========== Diff Algorithm ==========
+function computeLCS(a, b) {
+  // Returns array of [i, j] pairs in the LCS
+  const m = a.length, n = b.length;
+  if (m === 0 || n === 0) return [];
+
+  // Use shorter dimension for space optimization
+  const dp = new Array(n + 1).fill(0);
+  const prev = new Array(n + 1).fill(0);
+
+  // For backtracking, we need to store the full DP
+  // But that's O(m*n) memory. For segments this is fine since they're small.
+  const fullDp = [new Array(n + 1).fill(0)];
+  for (let i = 1; i <= m; i++) {
+    const row = new Array(n + 1).fill(0);
+    for (let j = 1; j <= n; j++) {
+      if (a[i-1] === b[j-1]) {
+        row[j] = fullDp[i-1][j-1] + 1;
+      } else {
+        row[j] = Math.max(fullDp[i-1][j], row[j-1]);
+      }
+    }
+    fullDp.push(row);
+  }
+
+  // Backtrack
+  const result = [];
+  let i = m, j = n;
+  while (i > 0 && j > 0) {
+    if (a[i-1] === b[j-1]) {
+      result.unshift([i-1, j-1]);
+      i--; j--;
+    } else if (fullDp[i-1][j] > fullDp[i][j-1]) {
+      i--;
+    } else {
+      j--;
+    }
+  }
+  return result;
+}
+
+// ========== Diff Algorithm (Left-Anchored, Monotonic + Position-Windowed) ==========
+// Left file (A) is the base. Matching preserves monotonic order (j increases).
+// Window constraint uses proportional position so it doesn't drift with
+// insertions/deletions, preventing cross-function misalignment.
+const MATCH_WINDOW_RATIO = 0.15; // max position ratio difference for a valid match
+
+function computeDiff(filteredA, filteredB) {
+  const linesA = filteredA.lines;
+  const linesB = filteredB.lines;
+  const origA = filteredA.origIndex;
+  const origB = filteredB.origIndex;
+  const lenA = linesA.length;
+  const lenB = linesB.length;
+  const maxWindow = Math.max(600, Math.floor(Math.max(lenA, lenB) * MATCH_WINDOW_RATIO));
+
+  // Build hash index for right file
+  const hashB = new Map();
+  for (let j = 0; j < lenB; j++) {
+    const h = simpleHash(linesB[j]);
+    if (!hashB.has(h)) hashB.set(h, []);
+    hashB.get(h).push(j);
+  }
+
+  // Phase 1: Position-proportional window matching (NO monotonic constraint)
+  // Only distance from expected proportional position matters.
+  // This allows matching across reordered content blocks while the window
+  // prevents cross-function/cross-region misalignment.
+  const matchA = new Array(lenA).fill(-1);
+  const matchB = new Array(lenB).fill(-1);
+
+  for (let i = 0; i < lenA; i++) {
+    const h = simpleHash(linesA[i]);
+    const candidates = hashB.get(h);
+    if (!candidates) continue;
+
+    const expectedB = Math.round(i * lenB / lenA);
+
+    let bestJ = -1;
+    let bestDist = Infinity;
+
+    for (const j of candidates) {
+      if (matchB[j] >= 0) continue;
+      if (linesA[i] !== linesB[j]) continue;
+
+      const dist = Math.abs(j - expectedB);
+      if (dist > maxWindow) continue;
+
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestJ = j;
+      }
+    }
+
+    if (bestJ >= 0) {
+      matchA[i] = bestJ;
+      matchB[bestJ] = i;
+    }
+  }
+
+  // Phase 1.5: Position-based pairing for unmatched lines
+  // When two files have identical structure but different content at the same
+  // position (e.g. renamed functions, different parameter values), pair them
+  // as "modified" instead of separate removed+added.
+  const NEAR_WINDOW = 30; // tight window for position-based pairing
+  for (let i = 0; i < lenA; i++) {
+    if (matchA[i] >= 0) continue; // already matched
+
+    const expectedB = Math.round(i * lenB / lenA);
+    const lo = Math.max(0, expectedB - NEAR_WINDOW);
+    const hi = Math.min(lenB - 1, expectedB + NEAR_WINDOW);
+
+    let bestJ = -1;
+    for (let j = lo; j <= hi; j++) {
+      if (matchB[j] >= 0) continue; // already matched
+      bestJ = j;
+      break; // take the first available unmatched right line
+    }
+
+    if (bestJ >= 0) {
+      matchA[i] = bestJ;
+      matchB[bestJ] = i;
+    }
+  }
+
+  // Phase 2: Generate diff items in left order
+  const items = [];
+  let nextB = 0;
+
+  for (let i = 0; i < lenA; i++) {
+    const j = matchA[i];
+
+    if (j >= 0) {
+      // Emit unmatched right lines between nextB and j
+      while (nextB < j) {
+        if (matchB[nextB] < 0) {
+          items.push({
+            type: 'added', lineA: -1, lineB: origB[nextB],
+            textA: null, textB: linesB[nextB],
+          });
+        }
+        nextB++;
+      }
+      // Safety: never allow nextB to go backward
+      nextB = Math.max(nextB, j + 1);
+
+      if (linesA[i] === linesB[j]) {
+        items.push({
+          type: 'same', lineA: origA[i], lineB: origB[j],
+          textA: linesA[i], textB: linesB[j],
+        });
+      } else {
+        items.push({
+          type: 'modified', lineA: origA[i], lineB: origB[j],
+          textA: linesA[i], textB: linesB[j],
+        });
+      }
+    } else {
+      items.push({
+        type: 'removed', lineA: origA[i], lineB: -1,
+        textA: linesA[i], textB: null,
+      });
+    }
+  }
+
+  // Phase 3: Remaining unmatched right lines
+  while (nextB < lenB) {
+    if (matchB[nextB] < 0) {
+      items.push({
+        type: 'added', lineA: -1, lineB: origB[nextB],
+        textA: null, textB: linesB[nextB],
+      });
+    }
+    nextB++;
+  }
+
+  // Phase 4: Merge adjacent removed+added into modified
+  const merged = [];
+  for (let i = 0; i < items.length; i++) {
+    if (i + 1 < items.length &&
+        items[i].type === 'removed' && items[i+1].type === 'added') {
+      merged.push({
+        type: 'modified',
+        lineA: items[i].lineA, lineB: items[i+1].lineB,
+        textA: items[i].textA, textB: items[i+1].textB,
+      });
+      i++;
+    } else {
+      merged.push(items[i]);
+    }
+  }
+
+  // Phase 5: Character-level diff on modified lines
+  for (const item of merged) {
+    if (item.type === 'modified') {
+      item.charDiffs = computeCharDiff(item.textA, item.textB);
+    }
+  }
+
+  return merged;
+}
+
+// ========== Character-Level Diff ==========
+function splitWords(text) {
+  const parts = [];
+  let current = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (/\w/.test(ch)) {
+      current += ch;
+    } else if (/\s/.test(ch)) {
+      if (current) { parts.push(current); current = ''; }
+      // Group whitespace
+      let ws = ch;
+      while (i + 1 < text.length && /\s/.test(text[i+1])) { ws += text[++i]; }
+      parts.push(ws);
+    } else {
+      if (current) { parts.push(current); current = ''; }
+      parts.push(ch);
+    }
+  }
+  if (current) parts.push(current);
+  return parts;
+}
+
+function computeCharDiff(textA, textB) {
+  const wordsA = splitWords(textA);
+  const wordsB = splitWords(textB);
+  const lcs = computeLCS(wordsA, wordsB);
+
+  const result = [];
+  let li = 0;
+  let i = 0, j = 0;
+  while (i < wordsA.length || j < wordsB.length) {
+    if (li < lcs.length && i === lcs[li][0] && j === lcs[li][1]) {
+      result.push({ text: wordsA[i], status: 'same' });
+      i++; j++; li++;
+    } else if (li < lcs.length && i < lcs[li][0] && j < lcs[li][1]) {
+      result.push({ text: wordsA[i], status: 'removed' });
+      i++;
+    } else if (i < wordsA.length && j < wordsB.length) {
+      // Both have content that differs - mark A as removed and B as added
+      result.push({ text: wordsA[i], status: 'removed' });
+      result.push({ text: wordsB[j], status: 'added' });
+      i++; j++;
+    } else if (i < wordsA.length) {
+      result.push({ text: wordsA[i], status: 'removed' });
+      i++;
+    } else if (j < wordsB.length) {
+      result.push({ text: wordsB[j], status: 'added' });
+      j++;
+    } else {
+      break;
+    }
+  }
+  return result;
+}
+
+// ========== Render Char Diff ==========
+function renderCharDiffHtml(charDiffs, side) {
+  // side: 'A' or 'B' - which side's diff status to use
+  if (!charDiffs) return '';
+  return charDiffs.map(d => {
+    if (d.status === 'same') return escapeHTML(d.text);
+    if (d.status === 'removed' && side === 'A') {
+      return `<span class="charRemoved">${escapeHTML(d.text)}</span>`;
+    }
+    if (d.status === 'added' && side === 'B') {
+      return `<span class="charAdded">${escapeHTML(d.text)}</span>`;
+    }
+    if (d.status === 'removed' && side === 'B') return '';
+    if (d.status === 'added' && side === 'A') return '';
+    return escapeHTML(d.text);
+  }).join('');
+}
+
+// ========== Folding Engine ==========
+const FOLD_THRESHOLD = 10; // minimum consecutive lines to trigger folding
+
+function computeDisplayList(items, foldSame, foldDiff) {
+  const displayList = [];
+  const collapsedSet = state.collapsedFolds;
+  let runStart = 0;
+
+  function flushRun(endIdx) {
+    const runLen = endIdx - runStart;
+    if (runLen < 1) return;
+    if (runLen < 2) {
+      // Single line, always show
+      displayList.push({ type: 'item', item: items[runStart], itemIdx: runStart });
+      return;
+    }
+
+    const allSame = items[runStart].type === 'same';
+    const runType = allSame ? 'same' : 'diff';
+    const shouldFold = (allSame && foldSame) || (!allSame && foldDiff);
+
+    if (shouldFold && runLen >= FOLD_THRESHOLD) {
+      const middleCount = runLen - 2; // lines between first and last
+      if (collapsedSet.has(runStart)) {
+        // Collapsed: show first line + fold markers + last line
+        displayList.push({ type: 'item', item: items[runStart], itemIdx: runStart });
+        displayList.push({
+          type: 'foldTop', foldType: runType, count: middleCount,
+          startIdx: runStart, endIdx: endIdx - 1, collapsed: true
+        });
+        // ... hidden middle lines ...
+        displayList.push({
+          type: 'foldBottom', foldType: runType, count: middleCount,
+          startIdx: runStart, endIdx: endIdx - 1, collapsed: true
+        });
+        displayList.push({ type: 'item', item: items[endIdx - 1], itemIdx: endIdx - 1 });
+      } else {
+        // Expanded: show all lines with toggle markers
+        displayList.push({ type: 'item', item: items[runStart], itemIdx: runStart });
+        displayList.push({
+          type: 'foldTop', foldType: runType, count: middleCount,
+          startIdx: runStart, endIdx: endIdx - 1, collapsed: false
+        });
+        for (let k = runStart + 1; k < endIdx - 1; k++) {
+          displayList.push({ type: 'item', item: items[k], itemIdx: k });
+        }
+        displayList.push({
+          type: 'foldBottom', foldType: runType, count: middleCount,
+          startIdx: runStart, endIdx: endIdx - 1, collapsed: false
+        });
+        displayList.push({ type: 'item', item: items[endIdx - 1], itemIdx: endIdx - 1 });
+      }
+    } else {
+      for (let k = runStart; k < endIdx; k++) {
+        displayList.push({ type: 'item', item: items[k], itemIdx: k });
+      }
+    }
+  }
+
+  for (let i = 1; i <= items.length; i++) {
+    if (i < items.length && items[i].type === items[runStart].type) {
+      continue;
+    }
+    flushRun(i);
+    runStart = i;
+  }
+
+  return displayList;
+}
+
+function toggleFold(displayIdx) {
+  const entry = state.displayList[displayIdx];
+  if (!entry || (entry.type !== 'foldTop' && entry.type !== 'foldBottom')) return;
+
+  // Save scroll positions before re-rendering
+  const scrollA = dom.contentA.scrollTop;
+  const scrollB = dom.contentB.scrollTop;
+
+  const startIdx = entry.startIdx;
+  if (state.collapsedFolds.has(startIdx)) {
+    state.collapsedFolds.delete(startIdx); // expand
+  } else {
+    state.collapsedFolds.add(startIdx); // collapse
+  }
+  state.displayList = computeDisplayList(
+    state.diffItems,
+    dom.chkFoldSame.checked,
+    dom.chkFoldDiff.checked
+  );
+  rebuildDiffNav();
+  renderDiffViewContent();
+
+  // Restore scroll positions
+  requestAnimationFrame(() => {
+    dom.contentA.scrollTop = scrollA;
+    dom.contentB.scrollTop = scrollB;
+    if (dom.contentA._updateRender) dom.contentA._updateRender();
+    if (dom.contentB._updateRender) dom.contentB._updateRender();
+  });
+}
+
+function ensureFoldExpanded(startIdx) {
+  if (state.collapsedFolds.has(startIdx)) {
+    state.collapsedFolds.delete(startIdx);
+    state.displayList = computeDisplayList(
+      state.diffItems,
+      dom.chkFoldSame.checked,
+      dom.chkFoldDiff.checked
+    );
+    rebuildDiffNav();
+    renderDiffViewContent();
+    return true;
+  }
+  return false;
+}
+
+// ========== Rendering ==========
+function renderPanel(side) {
+  const file = side === 'A' ? state.fileA : state.fileB;
+  const content = side === 'A' ? dom.contentA : dom.contentB;
+  if (!file) { content.innerHTML = '<div class="emptyMsg">未导入文件</div>'; return; }
+
+  // Virtual scrolling for raw view
+  setupVirtualScroll(side, content, file.lines);
+}
+
+function buildRawTableRows(lines, startIdx, endIdx, highlightRanges, side) {
+  let html = '';
+  const selection = side === 'A' ? state.selectionA : state.selectionB;
+  for (let i = startIdx; i <= endIdx; i++) {
+    if (i >= lines.length) break;
+    const lineNum = i + 1;
+    let rowClass = '';
+    if (selection && lineNum >= selection.start && lineNum <= selection.end) {
+      rowClass = 'rowSelected';
+    }
+    let displayText = lines[i];
+    // Highlight search results
+    const searchState = side === 'A' ? state.searchA : state.searchB;
+    if (searchState.query && searchState.dataIdx.length > 0) {
+      const matches = [];
+      let idx = 0;
+      const searchText = searchState.caseSensitive ? displayText : displayText.toLowerCase();
+      const query = searchState.caseSensitive ? searchState.query : searchState.query.toLowerCase();
+      while ((idx = searchText.indexOf(query, idx)) !== -1) {
+        matches.push(idx);
+        idx += query.length;
+      }
+      if (matches.length > 0) {
+        let highlighted = '';
+        let last = 0;
+        for (const pos of matches) {
+          highlighted += escapeHTML(displayText.substring(last, pos));
+          const isCurrent = searchState.results.length > 0 &&
+            searchState.current >= 0 &&
+            i === searchState.results[searchState.current];
+          highlighted += `<mark class="${isCurrent ? 'searchCurrent' : 'searchMatch'}">${escapeHTML(displayText.substring(pos, pos + searchState.query.length))}</mark>`;
+          last = pos + searchState.query.length;
+        }
+        highlighted += escapeHTML(displayText.substring(last));
+        displayText = highlighted;
+      } else {
+        displayText = escapeHTML(displayText);
+      }
+    } else {
+      displayText = escapeHTML(displayText);
+    }
+
+    html += `<tr class="${rowClass}" data-line="${lineNum}"><td class="ln">${lineNum}</td><td class="code">${displayText}</td></tr>`;
+  }
+  return html;
+}
+
+function setupVirtualScroll(side, container, lines) {
+  const totalHeight = lines.length * LINE_HEIGHT;
+  container.innerHTML = '';
+
+  const spacer = document.createElement('div');
+  spacer.style.height = totalHeight + 'px';
+  spacer.style.position = 'relative';
+  container.appendChild(spacer);
+
+  const table = document.createElement('table');
+  table.className = 'codeTable';
+  table.style.position = 'absolute';
+  table.style.top = '0';
+  table.style.left = '0';
+  table.style.width = '100%';
+  const colgroup = '<colgroup><col class="lineNum"><col></colgroup>';
+  table.innerHTML = colgroup + '<tbody></tbody>';
+  spacer.appendChild(table);
+  const tbody = table.querySelector('tbody');
+
+  let renderStart = -1, renderEnd = -1;
+
+  function updateRender() {
+    const scrollTop = container.scrollTop;
+    const clientHeight = container.clientHeight;
+    const start = Math.max(0, Math.floor(scrollTop / LINE_HEIGHT) - SCROLL_BUFFER);
+    const end = Math.min(lines.length - 1, Math.ceil((scrollTop + clientHeight) / LINE_HEIGHT) + SCROLL_BUFFER);
+
+    if (start === renderStart && end === renderEnd) return;
+    renderStart = start; renderEnd = end;
+
+    const html = buildRawTableRows(lines, start, end, [], side);
+    table.style.top = (start * LINE_HEIGHT) + 'px';
+    tbody.innerHTML = html;
+  }
+
+  if (container._scrollHandler) {
+    container.removeEventListener('scroll', container._scrollHandler);
+  }
+  container._scrollHandler = updateRender;
+  container._updateRender = updateRender;
+  container._forceRender = function() { renderStart = -1; renderEnd = -1; updateRender(); };
+  container.addEventListener('scroll', updateRender);
+  updateRender();
+}
+
+function renderDiffView() {
+  renderDiffViewContent();
+}
+
+function renderDiffViewContent() {
+  if (state.viewMode === 'unified') {
+    renderUnifiedView();
+    return;
+  }
+
+  const list = state.displayList;
+  if (list.length === 0) {
+    dom.contentA.innerHTML = '<div class="emptyMsg">无差异数据，请点击"整体对比"</div>';
+    dom.contentB.innerHTML = '<div class="emptyMsg">无差异数据，请点击"整体对比"</div>';
+    return;
+  }
+
+  const totalHeight = list.length * LINE_HEIGHT;
+  dom.contentA.innerHTML = '';
+  dom.contentB.innerHTML = '';
+
+  function setupDiffPanel(side, container) {
+    const spacer = document.createElement('div');
+    spacer.style.height = totalHeight + 'px';
+    spacer.style.position = 'relative';
+    container.appendChild(spacer);
+
+    const table = document.createElement('table');
+    table.className = 'codeTable';
+    table.style.position = 'absolute';
+    table.style.top = '0';
+    table.style.left = '0';
+    table.style.width = '100%';
+    table.innerHTML = '<colgroup><col class="lineNum"><col></colgroup><tbody></tbody>';
+    spacer.appendChild(table);
+    const tbody = table.querySelector('tbody');
+
+    let renderStart = -1, renderEnd = -1;
+
+    function updateRender() {
+      const scrollTop = container.scrollTop;
+      const clientHeight = container.clientHeight;
+      const start = Math.max(0, Math.floor(scrollTop / LINE_HEIGHT) - SCROLL_BUFFER);
+      const end = Math.min(list.length - 1, Math.ceil((scrollTop + clientHeight) / LINE_HEIGHT) + SCROLL_BUFFER);
+
+      if (start === renderStart && end === renderEnd) return;
+      renderStart = start; renderEnd = end;
+
+      const html = buildDiffTableRows(list, start, end, side);
+      table.style.top = (start * LINE_HEIGHT) + 'px';
+      tbody.innerHTML = html;
+    }
+
+    if (container._scrollHandler) {
+      container.removeEventListener('scroll', container._scrollHandler);
+    }
+    container._scrollHandler = updateRender;
+    container._updateRender = updateRender;
+    container._forceRender = function() { renderStart = -1; renderEnd = -1; updateRender(); };
+    container.addEventListener('scroll', updateRender);
+    updateRender();
+    return { updateRender };
+  }
+
+  setupDiffPanel('A', dom.contentA);
+  setupDiffPanel('B', dom.contentB);
+
+  // Sync scroll — controlled by checkbox
+  applySyncScroll();
+
+  dom.lineInfoA.textContent = state.fileA ? `${state.fileA.lines.length} 行 (差异视图)` : '';
+  dom.lineInfoB.textContent = state.fileB ? `${state.fileB.lines.length} 行 (差异视图)` : '';
+
+  rebuildDiffNav();
+}
+
+function applySyncScroll() {
+  // Remove any existing sync handlers
+  if (dom.contentA._syncScroll) {
+    dom.contentA.removeEventListener('scroll', dom.contentA._syncScroll);
+    dom.contentB.removeEventListener('scroll', dom.contentB._syncScroll);
+    dom.contentA._syncScroll = null;
+    dom.contentB._syncScroll = null;
+  }
+
+  if (dom.chkSyncScroll.checked) {
+    dom.contentA._syncScroll = function() {
+      if (dom.contentB.scrollTop !== this.scrollTop) {
+        dom.contentB.scrollTop = this.scrollTop;
+        if (dom.contentB._updateRender) dom.contentB._updateRender();
+      }
+    };
+    dom.contentB._syncScroll = function() {
+      if (dom.contentA.scrollTop !== this.scrollTop) {
+        dom.contentA.scrollTop = this.scrollTop;
+        if (dom.contentA._updateRender) dom.contentA._updateRender();
+      }
+    };
+    dom.contentA.addEventListener('scroll', dom.contentA._syncScroll);
+    dom.contentB.addEventListener('scroll', dom.contentB._syncScroll);
+  }
+}
+
+function buildDiffTableRows(list, startIdx, endIdx, side) {
+  let html = '';
+  const currentDiffIdx = state.currentDiff;
+  const currentItemIdx = (currentDiffIdx >= 0 && currentDiffIdx < state.diffDiffIndices.length)
+    ? state.diffDiffIndices[currentDiffIdx] : -1;
+  const selection = side === 'A' ? state.selectionA : state.selectionB;
+  const searchState = side === 'A' ? state.searchA : state.searchB;
+
+  for (let i = startIdx; i <= endIdx; i++) {
+    if (i >= list.length) break;
+    const entry = list[i];
+
+    if (entry.type === 'foldTop' || entry.type === 'foldBottom') {
+      const foldLabel = entry.foldType === 'same' ? '相同' : '不同';
+      const rowClass = entry.foldType === 'same' ? 'foldRowSame' : 'foldRowDiff';
+      const labelText = entry.collapsed
+        ? `| ${foldLabel}折叠 — 折叠行数 ${entry.count} |`
+        : `| 此处可折叠 — 折叠行数 ${entry.count} |`;
+      html += `<tr class="${rowClass}" data-displayidx="${i}" data-foldstart="${entry.startIdx}" onclick="toggleFold(${i})">
+        <td class="ln"></td>
+        <td class="code"><span class="foldText">${labelText}</span></td></tr>`;
+      continue;
+    }
+
+    const item = entry.item;
+    const lineNum = side === 'A' ? item.lineA : item.lineB;
+    const text = side === 'A' ? item.textA : item.textB;
+    const displayLineNum = lineNum >= 0 ? (lineNum + 1) : '';
+
+    if (item.type === 'same') {
+      let rowClass = 'diffSame';
+      if (i === currentItemIdx) rowClass += ' diffCurrent';
+      if (selection && lineNum >= 0 && displayLineNum >= selection.start && displayLineNum <= selection.end) {
+        rowClass += ' rowSelected';
+      }
+      html += `<tr class="${rowClass}" data-displayidx="${i}"><td class="ln">${displayLineNum}</td><td class="code">${highlightSearchText(escapeHTML(text || ''), searchState)}</td></tr>`;
+    } else if (item.type === 'added') {
+      let rowClass = 'diffAdded';
+      if (i === currentItemIdx) rowClass += ' diffCurrent';
+      if (side === 'B' && selection && lineNum >= 0 && displayLineNum >= selection.start && displayLineNum <= selection.end) {
+        rowClass += ' rowSelected';
+      }
+      html += `<tr class="${rowClass}" data-displayidx="${i}"><td class="ln">${side === 'B' ? displayLineNum : ''}</td><td class="code">${side === 'B' ? highlightSearchText(escapeHTML(text || ''), searchState) : ''}</td></tr>`;
+    } else if (item.type === 'removed') {
+      let rowClass = 'diffRemoved';
+      if (i === currentItemIdx) rowClass += ' diffCurrent';
+      if (side === 'A' && selection && lineNum >= 0 && displayLineNum >= selection.start && displayLineNum <= selection.end) {
+        rowClass += ' rowSelected';
+      }
+      html += `<tr class="${rowClass}" data-displayidx="${i}"><td class="ln">${side === 'A' ? displayLineNum : ''}</td><td class="code">${side === 'A' ? highlightSearchText(escapeHTML(text || ''), searchState) : ''}</td></tr>`;
+    } else if (item.type === 'modified') {
+      let rowClass = 'diffModified';
+      if (i === currentItemIdx) rowClass += ' diffCurrent';
+      if (selection && lineNum >= 0 && displayLineNum >= selection.start && displayLineNum <= selection.end) {
+        rowClass += ' rowSelected';
+      }
+      const charHtml = item.charDiffs ? renderCharDiffHtml(item.charDiffs, side) : escapeHTML(text || '');
+      html += `<tr class="${rowClass}" data-displayidx="${i}"><td class="ln">${displayLineNum}</td><td class="code">${highlightSearchText(charHtml, searchState)}</td></tr>`;
+    }
+  }
+  return html;
+}
+
+function highlightSearchText(html, searchState) {
+  if (!searchState.query) return html;
+  // Simple: wrap matches in mark tags within the already-escaped HTML
+  const query = searchState.caseSensitive ? searchState.query : searchState.query.toLowerCase();
+  if (!query) return html;
+
+  // Use regex to find text nodes (not inside tags)
+  // For simplicity, handle case where html is just escaped text
+  const escaped = escapeHTML(query);
+  const regex = new RegExp(searchState.caseSensitive ? escaped : escaped.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'gi');
+  return html.replace(regex, m => `<mark class="searchMatch">${m}</mark>`);
+}
+
+function renderUnifiedView() {
+  const list = state.displayList;
+  const panel = dom.unifiedPanel;
+  panel.innerHTML = '';
+
+  if (list.length === 0) {
+    panel.innerHTML = '<div class="emptyMsg">无差异数据</div>';
+    return;
+  }
+
+  let html = '';
+  for (let i = 0; i < list.length; i++) {
+    const entry = list[i];
+    if (entry.type === 'foldTop' || entry.type === 'foldBottom') {
+      const foldLabel = entry.foldType === 'same' ? '相同' : '不同';
+      const labelText = entry.collapsed
+        ? `| ${foldLabel}折叠 — 折叠行数 ${entry.count} |`
+        : `| 此处可折叠 — 折叠行数 ${entry.count} |`;
+      html += `<div class="unifiedRow" style="background:#f5f5f5;color:#888;text-align:center;font-style:italic;border-top:1px solid #ccc;border-bottom:1px solid #ccc;cursor:pointer;" onclick="toggleFold(${i})">${labelText}</div>`;
+      continue;
+    }
+    const item = entry.item;
+    if (item.type === 'same') {
+      html += `<div class="unifiedRow unifiedSame"><span class="unifiedPrefix"> </span>${escapeHTML(item.textA)}</div>`;
+    } else if (item.type === 'removed') {
+      html += `<div class="unifiedRow unifiedRemoved"><span class="unifiedPrefix">-</span>${escapeHTML(item.textA)}</div>`;
+    } else if (item.type === 'added') {
+      html += `<div class="unifiedRow unifiedAdded"><span class="unifiedPrefix">+</span>${escapeHTML(item.textB)}</div>`;
+    } else if (item.type === 'modified') {
+      html += `<div class="unifiedRow unifiedRemoved"><span class="unifiedPrefix">-</span>${escapeHTML(item.textA)}</div>`;
+      html += `<div class="unifiedRow unifiedAdded"><span class="unifiedPrefix">+</span>${escapeHTML(item.textB)}</div>`;
+    }
+  }
+  panel.innerHTML = html;
+}
+
+// ========== Diff Navigation ==========
+function rebuildDiffNav() {
+  const list = state.displayList;
+  state.diffDiffIndices = [];
+  for (let i = 0; i < list.length; i++) {
+    const entry = list[i];
+    if (entry.type === 'item' && entry.item.type !== 'same') {
+      state.diffDiffIndices.push(i);
+    }
+  }
+  const count = state.diffDiffIndices.length;
+  dom.diffCount.textContent = count > 0 ? `差异: ${count} 处` : '无差异';
+  state.currentDiff = count > 0 ? 0 : -1;
+}
+
+function goToDiff(direction) {
+  const indices = state.diffDiffIndices;
+  if (indices.length === 0) return;
+
+  if (direction === 'next') {
+    state.currentDiff = Math.min(state.currentDiff + 1, indices.length - 1);
+  } else {
+    state.currentDiff = Math.max(state.currentDiff - 1, 0);
+  }
+  dom.diffCount.textContent = `差异: (${state.currentDiff + 1}/${indices.length})`;
+
+  const targetIdx = indices[state.currentDiff];
+  const scrollTop = targetIdx * LINE_HEIGHT;
+
+  if (state.viewMode === 'unified') {
+    dom.unifiedPanel.scrollTop = scrollTop;
+  } else {
+    // Temporarily disconnect sync to avoid scroll loops
+    if (dom.contentA._syncScroll) {
+      dom.contentA.removeEventListener('scroll', dom.contentA._syncScroll);
+      dom.contentB.removeEventListener('scroll', dom.contentB._syncScroll);
+    }
+    dom.contentA.scrollTop = scrollTop;
+    dom.contentB.scrollTop = scrollTop;
+    if (dom.contentA._updateRender) dom.contentA._updateRender();
+    if (dom.contentB._updateRender) dom.contentB._updateRender();
+    requestAnimationFrame(() => {
+      applySyncScroll(); // Re-apply if sync is enabled
+    });
+  }
+}
+
+// ========== Search ==========
+function doSearch(side) {
+  const file = side === 'A' ? state.fileA : state.fileB;
+  const searchState = side === 'A' ? state.searchA : state.searchB;
+  const container = side === 'A' ? dom.contentA : dom.contentB;
+  const countEl = side === 'A' ? dom.searchCountA : dom.searchCountB;
+  const query = searchState.query;
+  const caseSensitive = searchState.caseSensitive;
+
+  if (!file || !query) {
+    searchState.results = [];
+    searchState.current = -1;
+    searchState.dataIdx = [];
+    countEl.textContent = '';
+    countEl.classList.remove('hasResults');
+    reRenderCurrent(side);
+    return;
+  }
+
+  searchState.results = [];
+  searchState.dataIdx = [];
+  const searchText = caseSensitive ? query : query.toLowerCase();
+
+  // Determine which lines to search based on current view
+  if (state.displayList.length > 0) {
+    // Diff view - search in display list entries
+    for (let i = 0; i < state.displayList.length; i++) {
+      const entry = state.displayList[i];
+      if (entry.type === 'fold') continue; // skip fold markers
+      const item = entry.item;
+      const text = side === 'A' ? item.textA : item.textB;
+      if (!text) continue;
+      const compareText = caseSensitive ? text : text.toLowerCase();
+      if (compareText.includes(searchText)) {
+        searchState.results.push(i);
+        searchState.dataIdx.push(i);
+      }
+    }
+  } else {
+    // Raw view - search in file lines
+    for (let i = 0; i < file.lines.length; i++) {
+      const compareText = caseSensitive ? file.lines[i] : file.lines[i].toLowerCase();
+      if (compareText.includes(searchText)) {
+        searchState.results.push(i);
+        searchState.dataIdx.push(i);
+      }
+    }
+  }
+
+  searchState.current = searchState.results.length > 0 ? 0 : -1;
+  if (searchState.results.length > 0) {
+    countEl.textContent = `${searchState.results.length} 个结果`;
+    countEl.classList.add('hasResults');
+    goToSearchResult(side, 0);
+  } else {
+    countEl.textContent = '无结果';
+    countEl.classList.remove('hasResults');
+  }
+  reRenderCurrent(side);
+}
+
+function goToSearchResult(side, direction) {
+  const searchState = side === 'A' ? state.searchA : state.searchB;
+  const container = side === 'A' ? dom.contentA : dom.contentB;
+  const countEl = side === 'A' ? dom.searchCountA : dom.searchCountB;
+
+  if (searchState.results.length === 0) return;
+
+  if (direction === 'next') {
+    searchState.current = (searchState.current + 1) % searchState.results.length;
+  } else {
+    searchState.current = (searchState.current - 1 + searchState.results.length) % searchState.results.length;
+  }
+
+  const targetIdx = searchState.results[searchState.current];
+  const scrollTop = targetIdx * LINE_HEIGHT;
+  container.scrollTop = scrollTop;
+
+  countEl.textContent = `${searchState.current + 1}/${searchState.results.length}`;
+  reRenderCurrent(side);
+}
+
+function clearSearch(side) {
+  const searchState = side === 'A' ? state.searchA : state.searchB;
+  const countEl = side === 'A' ? dom.searchCountA : dom.searchCountB;
+  const inputEl = side === 'A' ? dom.searchInputA : dom.searchInputB;
+  searchState.query = '';
+  searchState.results = [];
+  searchState.current = -1;
+  searchState.dataIdx = [];
+  countEl.textContent = '';
+  countEl.classList.remove('hasResults');
+  inputEl.value = '';
+  reRenderCurrent(side);
+}
+
+function reRenderCurrent(side) {
+  if (state.displayList.length > 0 && state.viewMode === 'side') {
+    if (dom.contentA._forceRender) dom.contentA._forceRender();
+    if (dom.contentB._forceRender) dom.contentB._forceRender();
+  } else if (state.displayList.length > 0 && state.viewMode === 'unified') {
+    renderUnifiedView();
+  } else {
+    if (side === 'A' && dom.contentA._forceRender) dom.contentA._forceRender();
+    if (side === 'B' && dom.contentB._forceRender) dom.contentB._forceRender();
+  }
+}
+
+// ========== Full Diff ==========
+function doFullDiff() {
+  if (!state.fileA || !state.fileB) return;
+
+  // Auto-enable sync scroll and scroll both panels to top
+  dom.chkSyncScroll.checked = true;
+  dom.contentA.scrollTop = 0;
+  dom.contentB.scrollTop = 0;
+
+  const options = {
+    ignoreComments: dom.chkIgnoreComments.checked,
+    ignoreWhitespace: dom.chkIgnoreWhitespace.checked,
+    ignoreCase: dom.chkIgnoreCase.checked,
+  };
+
+  state.filteredA = filterLinesForDiff(state.fileA.lines, options);
+  state.filteredB = filterLinesForDiff(state.fileB.lines, options);
+  state.diffItems = computeDiff(state.filteredA, state.filteredB);
+  state.currentDiff = -1;
+  state.collapsedFolds = new Set();
+  // Initially collapse all foldable runs
+  const foldSame = dom.chkFoldSame.checked;
+  const foldDiff = dom.chkFoldDiff.checked;
+  let runStart = 0;
+  for (let i = 1; i <= state.diffItems.length; i++) {
+    if (i < state.diffItems.length && state.diffItems[i].type === state.diffItems[runStart].type) continue;
+    const runLen = i - runStart;
+    const allSame = state.diffItems[runStart].type === 'same';
+    const shouldFold = (allSame && foldSame) || (!allSame && foldDiff);
+    if (shouldFold && runLen >= FOLD_THRESHOLD) {
+      state.collapsedFolds.add(runStart);
+    }
+    runStart = i;
+  }
+  state.viewMode = 'side';
+
+  // Compute display list with folding
+  state.displayList = computeDisplayList(
+    state.diffItems,
+    dom.chkFoldSame.checked,
+    dom.chkFoldDiff.checked
+  );
+
+  dom.btnUnifiedView.textContent = '统一视图';
+  dom.unifiedPanel.classList.remove('visible');
+  dom.unifiedPanel.innerHTML = '';
+  $('panelsContainer').style.display = 'flex';
+  dom.unifiedPanel.style.display = 'none';
+
+  clearSearch('A');
+  clearSearch('B');
+  renderDiffView();
+
+  updateStatus();
+}
+
+// ========== Region Select & Diff ==========
+function toggleRegionSelectMode() {
+  state.regionSelectMode = !state.regionSelectMode;
+
+  if (state.regionSelectMode) {
+    // Show usage guide
+    alert('区域选择使用说明：\n\n1. 点击左侧或右侧面板的行号，选择起始行（该行变蓝）\n2. 按住 Shift 键，再点击行号，选择结束行（起始到结束之间全部变蓝）\n3. 左右两侧均选好后，点击"执行对比"按钮\n4. 可先选左侧再选右侧，或反之，顺序不限\n\n再次点击"选择区域"可退出选择模式。');
+
+    dom.btnSelectRegion.classList.add('active');
+    dom.btnSelectRegion.textContent = '选择区域 (选取中...)';
+    dom.chkSyncScroll.checked = false;
+    applySyncScroll();
+    state.selectionA = null;
+    state.selectionB = null;
+    updateSelectionDisplay();
+    reRenderCurrent('A');
+    reRenderCurrent('B');
+  } else {
+    // Exit region select mode
+    dom.btnSelectRegion.classList.remove('active');
+    dom.btnSelectRegion.textContent = '选择区域';
+    state.selectionA = null;
+    state.selectionB = null;
+    updateSelectionDisplay();
+    reRenderCurrent('A');
+    reRenderCurrent('B');
+  }
+  updateButtons();
+}
+
+function execRegionDiff() {
+  if (!state.fileA || !state.fileB) return;
+  if (!state.selectionA || !state.selectionB) {
+    alert('请先完成左右两侧的区域选择：\n\n1. 点击"选择区域"进入选择模式\n2. 点击行号选择起始行\n3. Shift+点击行号选择结束行\n4. 左右两侧都选好后，点击"执行对比"\n\n状态栏会显示当前选中范围。');
+    return;
+  }
+
+  // Exit select mode
+  state.regionSelectMode = false;
+  dom.btnSelectRegion.classList.remove('active');
+  dom.btnSelectRegion.textContent = '选择区域';
+
+  dom.chkSyncScroll.checked = false;
+  applySyncScroll();
+
+  const options = {
+    ignoreComments: dom.chkIgnoreComments.checked,
+    ignoreWhitespace: dom.chkIgnoreWhitespace.checked,
+    ignoreCase: dom.chkIgnoreCase.checked,
+  };
+
+  const selA = state.selectionA;
+  const selB = state.selectionB;
+  const linesA = state.fileA.lines.slice(selA.start - 1, selA.end);
+  const linesB = state.fileB.lines.slice(selB.start - 1, selB.end);
+
+  const filteredA = filterLinesForDiff(linesA, options);
+  const filteredB = filterLinesForDiff(linesB, options);
+  const diffItems = computeDiff(filteredA, filteredB);
+
+  for (const item of diffItems) {
+    if (item.lineA >= 0) item.lineA += selA.start - 1;
+    if (item.lineB >= 0) item.lineB += selB.start - 1;
+  }
+
+  dom.regionPanel.classList.add('visible');
+  renderRegionDiff(diffItems);
+  updateButtons();
+}
+
+function renderRegionDiff(items) {
+  const container = dom.regionContent;
+  let html = '<table class="codeTable" style="width:100%"><colgroup><col class="lineNum"><col><col class="lineNum"><col></colgroup>';
+
+  for (const item of items) {
+    if (item.type === 'same') {
+      html += `<tr class="diffSame"><td class="ln">${item.lineA+1}</td><td class="code">${escapeHTML(item.textA)}</td><td class="ln">${item.lineB+1}</td><td class="code">${escapeHTML(item.textB)}</td></tr>`;
+    } else if (item.type === 'added') {
+      html += `<tr class="diffAdded"><td class="ln"></td><td class="code"></td><td class="ln">${item.lineB+1}</td><td class="code">${escapeHTML(item.textB)}</td></tr>`;
+    } else if (item.type === 'removed') {
+      html += `<tr class="diffRemoved"><td class="ln">${item.lineA+1}</td><td class="code">${escapeHTML(item.textA)}</td><td class="ln"></td><td class="code"></td></tr>`;
+    } else if (item.type === 'modified') {
+      const charA = item.charDiffs ? renderCharDiffHtml(item.charDiffs, 'A') : escapeHTML(item.textA);
+      const charB = item.charDiffs ? renderCharDiffHtml(item.charDiffs, 'B') : escapeHTML(item.textB);
+      html += `<tr class="diffModified"><td class="ln">${item.lineA+1}</td><td class="code">${charA}</td><td class="ln">${item.lineB+1}</td><td class="code">${charB}</td></tr>`;
+    }
+  }
+  html += '</table>';
+  container.innerHTML = html;
+}
+
+// ========== Row Selection ==========
+function setupSelectionHandlers() {
+  [dom.contentA, dom.contentB].forEach((container, idx) => {
+    const side = idx === 0 ? 'A' : 'B';
+
+    container.addEventListener('click', (e) => {
+      const row = e.target.closest('tr');
+      if (!row) return;
+      let lineNum;
+      if (e.target.classList.contains('ln')) {
+        lineNum = parseInt(row.querySelector('.ln').textContent);
+        if (isNaN(lineNum)) return;
+      } else {
+        return; // Only respond to line number clicks for selection
+      }
+
+      if (e.shiftKey) {
+        // Extend selection
+        const sel = side === 'A' ? state.selectionA : state.selectionB;
+        if (sel) {
+          const newEnd = lineNum;
+          const newSel = {
+            start: Math.min(sel.start, newEnd),
+            end: Math.max(sel.start, newEnd),
+          };
+          if (side === 'A') state.selectionA = newSel;
+          else state.selectionB = newSel;
+        }
+      } else {
+        if (side === 'A') {
+          if (state.selectionA && state.selectionA.start === lineNum && state.selectionA.end === lineNum) {
+            state.selectionA = null;
+          } else {
+            state.selectionA = { start: lineNum, end: lineNum };
+          }
+        } else {
+          if (state.selectionB && state.selectionB.start === lineNum && state.selectionB.end === lineNum) {
+            state.selectionB = null;
+          } else {
+            state.selectionB = { start: lineNum, end: lineNum };
+          }
+        }
+      }
+
+      updateSelectionDisplay();
+      reRenderCurrent(side);
+    });
+  });
+}
+
+function updateSelectionDisplay() {
+  let text = '';
+  if (state.selectionA) {
+    const cnt = state.selectionA.end - state.selectionA.start + 1;
+    text += 'A 选中: ' + state.selectionA.start + '-' + state.selectionA.end + '行 (' + cnt + '行) ';
+  }
+  if (state.selectionB) {
+    const cnt = state.selectionB.end - state.selectionB.start + 1;
+    text += 'B 选中: ' + state.selectionB.start + '-' + state.selectionB.end + '行 (' + cnt + '行)';
+  }
+  if (state.regionSelectMode && (!state.selectionA || !state.selectionB)) {
+    if (!text) text = '选择模式：请点击行号选择区域';
+    else text += ' (另一端待选择)';
+  }
+  dom.statusSelection.textContent = text;
+  dom.btnExecRegion.disabled = !(state.fileA && state.fileB && state.selectionA && state.selectionB);
+}
+
+// ========== Unified View Toggle ==========
+function toggleUnifiedView() {
+  if (state.displayList.length === 0) return;
+
+  if (state.viewMode === 'side') {
+    state.viewMode = 'unified';
+    dom.btnUnifiedView.textContent = '并排视图';
+    $('panelsContainer').style.display = 'none';
+    dom.unifiedPanel.style.display = 'block';
+    dom.unifiedPanel.classList.add('visible');
+    renderUnifiedView();
+  } else {
+    state.viewMode = 'side';
+    dom.btnUnifiedView.textContent = '统一视图';
+    $('panelsContainer').style.display = 'flex';
+    dom.unifiedPanel.style.display = 'none';
+    dom.unifiedPanel.classList.remove('visible');
+    renderDiffView();
+  }
+}
+
+// ========== Swap Files ==========
+function swapFiles() {
+  if (!state.fileA || !state.fileB) return;
+
+  // Swap file data
+  [state.fileA, state.fileB] = [state.fileB, state.fileA];
+
+  // Update UI
+  dom.fileNameA.textContent = `文件A: ${state.fileA.name}`;
+  dom.fileNameB.textContent = `文件B: ${state.fileB.name}`;
+  dom.lineInfoA.textContent = `${state.fileA.lines.length} 行`;
+  dom.lineInfoB.textContent = `${state.fileB.lines.length} 行`;
+
+  // Re-render raw
+  renderPanel('A');
+  renderPanel('B');
+
+  // Redo diff if exists
+  if (state.diffItems.length > 0) {
+    doFullDiff();
+  }
+
+  clearSearch('A');
+  clearSearch('B');
+  updateStatus();
+}
+
+// ========== Export ==========
+// ========== Goto Line Dialog ==========
+function showGotoDialog(side) {
+  state.gotoPanel = side;
+  const file = side === 'A' ? state.fileA : state.fileB;
+  if (!file) return;
+  dom.gotoTitle.textContent = `跳转到行 - 文件${side} (1-${file.lines.length})`;
+  dom.gotoInput.max = file.lines.length;
+  dom.gotoInput.value = '';
+  dom.gotoDialog.classList.add('visible');
+  dom.gotoInput.focus();
+}
+
+function confirmGoto() {
+  const side = state.gotoPanel;
+  const lineNum = parseInt(dom.gotoInput.value);
+  const file = side === 'A' ? state.fileA : state.fileB;
+  const container = side === 'A' ? dom.contentA : dom.contentB;
+
+  if (!file || isNaN(lineNum) || lineNum < 1 || lineNum > file.lines.length) return;
+  dom.gotoDialog.classList.remove('visible');
+
+  // Disable sync scroll when jumping to a line
+  dom.chkSyncScroll.checked = false;
+  applySyncScroll();
+
+  const origIdx = lineNum - 1; // 0-based original line index
+
+  // Check if target is inside a fold and expand it
+  if (state.diffItems.length > 0) {
+    // Find the diff item containing this line
+    for (let i = 0; i < state.diffItems.length; i++) {
+      const item = state.diffItems[i];
+      const itemLine = side === 'A' ? item.lineA : item.lineB;
+      if (itemLine === origIdx) {
+        // Found. Now check if this item is inside a collapsed fold
+        for (const foldStart of state.collapsedFolds) {
+          // Find the fold boundaries
+          let foldEnd = foldStart;
+          while (foldEnd < state.diffItems.length && state.diffItems[foldEnd].type === state.diffItems[foldStart].type) {
+            foldEnd++;
+          }
+          foldEnd--;
+          if (i >= foldStart && i <= foldEnd) {
+            // Target is inside a fold, expand it
+            state.collapsedFolds.delete(foldStart);
+            state.displayList = computeDisplayList(
+              state.diffItems,
+              dom.chkFoldSame.checked,
+              dom.chkFoldDiff.checked
+            );
+            rebuildDiffNav();
+            renderDiffViewContent();
+          }
+        }
+        break;
+      }
+    }
+
+    // Find the display list index for this line
+    let displayIdx = -1;
+    for (let d = 0; d < state.displayList.length; d++) {
+      const entry = state.displayList[d];
+      if (entry.type === 'item') {
+        const il = side === 'A' ? entry.item.lineA : entry.item.lineB;
+        if (il === origIdx) { displayIdx = d; break; }
+      }
+    }
+
+    if (displayIdx >= 0) {
+      // Center the target line in the viewport
+      const clientHeight = container.clientHeight;
+      const centerOffset = Math.floor(clientHeight / 2 / LINE_HEIGHT) * LINE_HEIGHT;
+      const scrollTop = Math.max(0, displayIdx * LINE_HEIGHT - centerOffset);
+      container.scrollTop = scrollTop;
+      // Sync other panel
+      const other = side === 'A' ? dom.contentB : dom.contentA;
+      other.scrollTop = scrollTop;
+      if (container._updateRender) container._updateRender();
+      if (other._updateRender) other._updateRender();
+      return;
+    }
+  }
+
+  // Raw view fallback
+  const clientHeight = container.clientHeight;
+  const centerOffset = Math.floor(clientHeight / 2 / LINE_HEIGHT) * LINE_HEIGHT;
+  const scrollTop = Math.max(0, origIdx * LINE_HEIGHT - centerOffset);
+  container.scrollTop = scrollTop;
+  if (container._updateRender) container._updateRender();
+}
+
+// ========== Copy ==========
+function setupCopyHandler() {
+  document.addEventListener('copy', (e) => {
+    const selA = state.selectionA;
+    const selB = state.selectionB;
+    const activePanel = document.activeElement;
+
+    // Determine which panel is active
+    let lines = null;
+    if (activePanel && activePanel.closest('#panelA') && selA) {
+      lines = state.fileA.lines.slice(selA.start - 1, selA.end);
+    } else if (activePanel && activePanel.closest('#panelB') && selB) {
+      lines = state.fileB.lines.slice(selB.start - 1, selB.end);
+    }
+
+    if (lines) {
+      e.preventDefault();
+      e.clipboardData.setData('text/plain', lines.join('\n'));
+    }
+  });
+}
+
+// ========== Resizer ==========
+function setupResizer() {
+  let isResizing = false;
+  const resizer = dom.resizer;
+  const panelA = $('panelA');
+  const panelB = $('panelB');
+  const container = $('panelsContainer');
+
+  resizer.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    resizer.classList.add('active');
+    document.body.style.cursor = 'col-resize';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    const rect = container.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const pct = (x / rect.width) * 100;
+    if (pct > 20 && pct < 80) {
+      panelA.style.flex = `${pct}`;
+      panelB.style.flex = `${100 - pct}`;
+    }
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isResizing) {
+      isResizing = false;
+      resizer.classList.remove('active');
+      document.body.style.cursor = '';
+    }
+  });
+}
+
+function setupRegionResizer() {
+  let isResizing = false;
+  const handle = $('regionResizer');
+  const panel = dom.regionPanel;
+  if (!handle || !panel) return;
+
+  handle.addEventListener('mousedown', function(e) {
+    isResizing = true;
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!isResizing) return;
+    const bodyRect = document.body.getBoundingClientRect();
+    const panelTop = panel.getBoundingClientRect().top;
+    const newHeight = bodyRect.bottom - e.clientY;
+    if (newHeight > 80 && newHeight < bodyRect.height * 0.7) {
+      panel.style.height = newHeight + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', function() {
+    isResizing = false;
+  });
+}
+
+// ========== Drag and Drop ==========
+function setupDragDrop() {
+  // Critical: prevent browser from opening dragged files
+  // capture phase ensures we intercept before browser default behavior
+  document.addEventListener('dragover', function(e) {
+    e.preventDefault();
+  }, true);
+
+  document.addEventListener('drop', function(e) {
+    e.preventDefault();
+  }, true);
+
+  // Per-panel drop zone handling
+  const containers = [
+    { el: dom.contentA, side: 'A' },
+    { el: dom.contentB, side: 'B' },
+  ];
+
+  containers.forEach(function(item) {
+    var el = item.el;
+    var side = item.side;
+    if (!el) return;
+
+    var dragCounter = 0;
+
+    el.addEventListener('dragenter', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter++;
+      el.classList.add('dropZone');
+    }, false);
+
+    el.addEventListener('dragleave', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        el.classList.remove('dropZone');
+      }
+    }, false);
+
+    el.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }, false);
+
+    el.addEventListener('drop', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter = 0;
+      el.classList.remove('dropZone');
+      var files = e.dataTransfer.files;
+      if (files.length > 0) {
+        handleFile(files[0], side);
+      }
+    }, false);
+  });
+}
+
+// ========== Status Update ==========
+function updateStatus() {
+  let info = '就绪';
+  if (state.fileA && state.fileB) {
+    info = `A: ${state.fileA.lines.length}行 | B: ${state.fileB.lines.length}行`;
+  } else if (state.fileA || state.fileB) {
+    info = state.fileA ? `A: ${state.fileA.lines.length}行 (B未导入)` : `B: ${state.fileB.lines.length}行 (A未导入)`;
+  }
+  dom.statusFileInfo.textContent = info;
+}
+
+function updateButtons() {
+  const bothLoaded = !!(state.fileA && state.fileB);
+  dom.btnSwap.disabled = !bothLoaded;
+  dom.btnReset.disabled = !(state.fileA || state.fileB);
+  dom.btnFullDiff.disabled = !bothLoaded;
+  dom.btnSelectRegion.disabled = !bothLoaded;
+  dom.btnExecRegion.disabled = !(bothLoaded && state.selectionA && state.selectionB);
+  dom.btnPrevDiff.disabled = state.diffDiffIndices.length === 0;
+  dom.btnNextDiff.disabled = state.diffDiffIndices.length === 0;
+}
+
+function clearDiff() {
+  state.diffItems = [];
+  state.displayList = [];
+  state.diffDiffIndices = [];
+  state.currentDiff = -1;
+  state.collapsedFolds = new Set();
+  dom.diffCount.textContent = '未对比';
+  dom.btnPrevDiff.disabled = true;
+  dom.btnNextDiff.disabled = true;
+  dom.unifiedPanel.classList.remove('visible');
+  dom.unifiedPanel.innerHTML = '<div class="emptyMsg">请先执行对比</div>';
+  dom.unifiedPanel.style.display = 'none';
+  $('panelsContainer').style.display = 'flex';
+  state.viewMode = 'side';
+  dom.btnUnifiedView.textContent = '统一视图';
+}
+
+function doReset() {
+  // Reset checkboxes to defaults
+  dom.chkSyncScroll.checked = false;
+  dom.chkIgnoreComments.checked = false;
+  dom.chkIgnoreWhitespace.checked = true;
+  dom.chkIgnoreCase.checked = true;
+  dom.chkFoldSame.checked = false;
+  dom.chkFoldDiff.checked = false;
+  dom.chkCaseA.checked = false;
+  dom.chkCaseB.checked = false;
+
+  // Reset state
+  state.selectionA = null;
+  state.selectionB = null;
+  state.regionSelectMode = false;
+  dom.btnSelectRegion.classList.remove('active');
+  dom.btnSelectRegion.textContent = '选择区域';
+  state.collapsedFolds = new Set();
+
+  // Clear diff
+  clearDiff();
+
+  // Clear search
+  clearSearch('A');
+  clearSearch('B');
+
+  // Clear region panel
+  dom.regionPanel.classList.remove('visible');
+
+  // Scroll to top
+  dom.contentA.scrollTop = 0;
+  dom.contentB.scrollTop = 0;
+
+  // Re-render raw views
+  if (state.fileA) renderPanel('A');
+  if (state.fileB) renderPanel('B');
+
+  applySyncScroll();
+  updateSelectionDisplay();
+  updateStatus();
+  updateButtons();
+}
+
+// ========== Keyboard Shortcuts ==========
+function setupKeyboard() {
+  document.addEventListener('keydown', (e) => {
+    // Ctrl+F - focus search
+    if (e.ctrlKey && e.key === 'f') {
+      e.preventDefault();
+      // Focus the search input of the panel that has focus
+      const active = document.activeElement;
+      if (active && active.closest('#panelB')) {
+        dom.searchInputB.focus();
+      } else {
+        dom.searchInputA.focus();
+      }
+    }
+
+    // F3 - next search result
+    if (e.key === 'F3' && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      const active = document.activeElement;
+      const side = (active && active.closest('#panelB')) ? 'B' : 'A';
+      if (e.shiftKey) {
+        goToSearchResult(side, 'prev');
+      } else {
+        goToSearchResult(side, 'next');
+      }
+    }
+
+    // F7 - diff navigation
+    if (e.key === 'F7' && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      if (e.shiftKey) {
+        goToDiff('prev');
+      } else {
+        goToDiff('next');
+      }
+    }
+
+    // F5 - refresh (re-diff)
+    if (e.key === 'F5' && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      if (state.fileA && state.fileB) doFullDiff();
+    }
+
+    // Ctrl+G - goto line
+    if (e.ctrlKey && e.key === 'g') {
+      e.preventDefault();
+      const active = document.activeElement;
+      const side = (active && active.closest('#panelB')) ? 'B' : 'A';
+      showGotoDialog(side);
+    }
+
+    // Escape - close dialogs
+    if (e.key === 'Escape') {
+      dom.gotoDialog.classList.remove('visible');
+      dom.encodingDialog.classList.remove('visible');
+      // Clear search
+      const active = document.activeElement;
+      if (active === dom.searchInputA) {
+        clearSearch('A');
+      } else if (active === dom.searchInputB) {
+        clearSearch('B');
+      }
+    }
+
+    // Enter in search inputs
+    if (e.key === 'Enter') {
+      if (document.activeElement === dom.searchInputA) {
+        goToSearchResult('A', e.shiftKey ? 'prev' : 'next');
+      } else if (document.activeElement === dom.searchInputB) {
+        goToSearchResult('B', e.shiftKey ? 'prev' : 'next');
+      }
+    }
+  });
+}
+
+// ========== Event Bindings ==========
+function setupEvents() {
+  dom.btnImportA.addEventListener('click', () => triggerFileImport('A'));
+  dom.btnImportB.addEventListener('click', () => triggerFileImport('B'));
+  dom.btnSwap.addEventListener('click', swapFiles);
+  dom.btnReset.addEventListener('click', doReset);
+  dom.btnFullDiff.addEventListener('click', doFullDiff);
+  dom.btnSelectRegion.addEventListener('click', toggleRegionSelectMode);
+  dom.btnExecRegion.addEventListener('click', execRegionDiff);
+  dom.btnUnifiedView.addEventListener('click', toggleUnifiedView);
+  dom.btnPrevDiff.addEventListener('click', () => goToDiff('prev'));
+  dom.btnNextDiff.addEventListener('click', () => goToDiff('next'));
+  dom.btnGotoA.addEventListener('click', () => showGotoDialog('A'));
+  dom.btnGotoB.addEventListener('click', () => showGotoDialog('B'));
+  $('btnCloseRegion').addEventListener('click', () => {
+    dom.regionPanel.classList.remove('visible');
+  });
+  $('gotoCancel').addEventListener('click', () => dom.gotoDialog.classList.remove('visible'));
+  $('gotoConfirm').addEventListener('click', confirmGoto);
+
+  // Search inputs
+  dom.searchInputA.addEventListener('input', () => {
+    state.searchA.query = dom.searchInputA.value;
+    doSearch('A');
+  });
+  dom.searchInputB.addEventListener('input', () => {
+    state.searchB.query = dom.searchInputB.value;
+    doSearch('B');
+  });
+  dom.chkCaseA.addEventListener('change', () => {
+    state.searchA.caseSensitive = dom.chkCaseA.checked;
+    if (state.searchA.query) doSearch('A');
+  });
+  dom.chkCaseB.addEventListener('change', () => {
+    state.searchB.caseSensitive = dom.chkCaseB.checked;
+    if (state.searchB.query) doSearch('B');
+  });
+  $('btnSearchPrevA').addEventListener('click', () => goToSearchResult('A', 'prev'));
+  $('btnSearchNextA').addEventListener('click', () => goToSearchResult('A', 'next'));
+  $('btnSearchPrevB').addEventListener('click', () => goToSearchResult('B', 'prev'));
+  $('btnSearchNextB').addEventListener('click', () => goToSearchResult('B', 'next'));
+
+  // Filter checkbox re-diff when changed
+  [dom.chkIgnoreComments, dom.chkIgnoreWhitespace, dom.chkIgnoreCase].forEach(function(chk) {
+    chk.addEventListener('change', function() {
+      if (state.fileA && state.fileB && state.diffItems.length > 0) doFullDiff();
+    });
+  });
+
+  // Sync scroll toggle — re-apply immediately
+  dom.chkSyncScroll.addEventListener('change', function() {
+    if (state.displayList.length > 0) {
+      applySyncScroll();
+    }
+  });
+
+  // Fold checkboxes — re-fold without re-diff
+  function refold() {
+    if (state.diffItems.length > 0) {
+      state.collapsedFolds = new Set();
+      const foldSame = dom.chkFoldSame.checked;
+      const foldDiff = dom.chkFoldDiff.checked;
+      // Re-compute which folds should be collapsed
+      let rs = 0;
+      for (let i = 1; i <= state.diffItems.length; i++) {
+        if (i < state.diffItems.length && state.diffItems[i].type === state.diffItems[rs].type) continue;
+        const rl = i - rs;
+        const as = state.diffItems[rs].type === 'same';
+        const sf = (as && foldSame) || (!as && foldDiff);
+        if (sf && rl >= FOLD_THRESHOLD) state.collapsedFolds.add(rs);
+        rs = i;
+      }
+      state.displayList = computeDisplayList(state.diffItems, foldSame, foldDiff);
+      renderDiffViewContent();
+    }
+  }
+  dom.chkFoldSame.addEventListener('change', refold);
+  dom.chkFoldDiff.addEventListener('change', refold);
+
+  setupSelectionHandlers();
+  setupKeyboard();
+  setupResizer();
+  setupRegionResizer();
+  setupCopyHandler();
+}
+
+// ========== Init ==========
+function init() {
+  console.log('[DiffTool] Initializing...');
+
+  // Step 1: File inputs — must work for the tool to function
+  try {
+    setupFileInputs();
+    console.log('[DiffTool] File inputs OK');
+  } catch(e) {
+    console.error('[DiffTool] File inputs FAILED:', e);
+  }
+
+  // Step 2: Drag & drop — intercept before browser takes over
+  try {
+    setupDragDrop();
+    console.log('[DiffTool] Drag & drop OK');
+  } catch(e) {
+    console.error('[DiffTool] Drag & drop FAILED:', e);
+  }
+
+  // Step 3: Event bindings
+  try {
+    setupEvents();
+    console.log('[DiffTool] Events OK');
+  } catch(e) {
+    console.error('[DiffTool] Events FAILED:', e);
+  }
+
+  // Step 4: UI state
+  try {
+    updateButtons();
+    console.log('[DiffTool] Init complete');
+  } catch(e) {
+    console.error('[DiffTool] Update buttons FAILED:', e);
+  }
+}
+
+// Ensure init runs even if script loads after DOM is ready
+(function() {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+</body>
+</html>
